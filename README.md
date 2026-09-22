@@ -51,3 +51,45 @@ samples/ 下三段文本，输入是 `text-N.txt`，期望输出是 `text-N.expe
 | text-1.txt | 24 |
 | text-2.txt | 20 |
 | text-3.txt | 32 |
+
+## 实现说明
+
+代码只用标准库，布局如下：
+
+- `linebreak_engine/widths.py`：宽度区间表，区间按起始码位排序，查询用二分查找（O(log R)）。
+- `linebreak_engine/rules.py`：`Rules`（宽度表 + 行首/行尾禁则集合）及两个规则文件的解析。
+- `linebreak_engine/engine.py`：单元切分、超长单元强制拆分、动态规划、渲染。
+- `layout.py`：命令行入口。
+- `tests/test_linebreak.py`：`unittest` 测试，含三个样例的逐字节验收和独立暴力枚举对照。
+
+### 算法
+
+1. **切单元**：宽 2 码位各自成 CJK 单元；连续的宽 1 非分隔符码位组成一个词单元，因此连字符词（`state-of-the-art`）与数字天然不可拆；分隔符只记录单元间是否有空格。
+2. **强制拆分（降级路径）**：宽度超过 `W` 的单元按字符贪心切成「能放多少放多少」的片段；每刀记 1000 分，片段所在行豁免禁则，单字符仍超宽时允许溢出一行。
+3. **动态规划**：自后向前递推，`g[i]` 为后缀 `[i, n)` 的最小代价，枚举当前行结尾 `k`（行宽超过 `W` 即停），转移代价按上式计算。
+   - 行顶/行底边界各做一次禁则检查；违反禁则的 `k` 跳过（继续尝试更靠后的断点，连续标点因此整串一起移动），行顶违法直接终止该状态的扫描。
+   - 代价并列时取更大的 `k`（当前行更长）；该局部偏好沿后缀递推复合成「第一行尽量长、再依次让后续行尽量长」的全局唯一裁决，与遍历顺序无关、无随机。
+4. **复杂度**：每个状态只在行宽上限内向前枚举，常规排版下为 O(n)；宽度表查询为 O(log R)。
+
+### 用法
+
+命令行：
+
+```sh
+python3 layout.py --width 24 samples/text-1.txt
+```
+
+库：
+
+```python
+from linebreak_engine import load_rules, layout_text
+
+rules = load_rules("samples/widths.txt", "samples/kinsoku.txt")
+print(layout_text("要排的文本……", rules, 24))
+```
+
+### 测试
+
+```sh
+python3 -m unittest discover -s tests
+```
