@@ -51,3 +51,56 @@ samples/ 下三段文本，输入是 `text-N.txt`，期望输出是 `text-N.expe
 | text-1.txt | 24 |
 | text-2.txt | 20 |
 | text-3.txt | 32 |
+
+## 实现与使用
+
+代码只用标准库，结构如下：
+
+- `linebreak/widths.py`：宽度表解析与查表（区间按起始码位索引，二分查找）；
+- `linebreak/kinsoku.py`：行首/行尾禁则字符表解析；
+- `linebreak/tokenizer.py`：文本切单元（单词原子、CJK 单字、前导空格标记）；
+- `linebreak/engine.py`：超长单元预拆分与动态规划主流程；
+- `tests/test_linebreak.py`：`unittest` 测试，含三个样例的逐字节验收；
+- `python -m linebreak`：命令行入口。
+
+命令行：
+
+```
+python -m linebreak -w 24 samples/text-1.txt
+python -m linebreak -w 20 --widths samples/widths.txt --kinsoku samples/kinsoku.txt < in.txt
+```
+
+库调用：
+
+```python
+from linebreak.widths import WidthTable
+from linebreak.kinsoku import load_kinsoku
+from linebreak.engine import layout_text, layout_paragraph
+
+widths = WidthTable.from_file("samples/widths.txt")
+no_start, no_end = load_kinsoku("samples/kinsoku.txt")
+result = layout_text(text, max_width=24, width_table=widths,
+                     no_line_start=no_start, no_line_end=no_end)
+```
+
+跑测试：
+
+```
+python3 -m unittest discover -s tests
+```
+
+### 复杂度与确定性
+
+`dp[i]` 的左端只扫到累计宽度超过 W 为止，行宽固定时每个单元入队常数次，
+时间 O(n)，空间 O(n)（200 万单元、W=80 约 11 秒；几十万字的书稿在 1 秒量级）。
+算法不含随机、不依赖字典/集合的遍历顺序：宽度区间按起始码位排序后二分，
+同代价的并列只按断点位置（左端更小者胜）决策，同一份输入任意跑两遍字节一致。
+
+### 边界约定
+
+- 分隔符只认 ASCII 空格；连续空格按一个空格处理；行首空格一律丢弃。
+- 半角片假名宽度表给 1，但属于日文，按 CJK 单元处理（两侧可断）。
+- 段内换行折叠为空格，空行分段（Markdown 惯例）；段间输出一个空行。
+- 行宽小到连单个全角字符都放不下（W=1）时，该字符独占一行并允许溢出，
+  属于 README 中说明的降级路径，不额外罚分；禁则在极端窄行下无合法断法时，
+  兜底放宽禁则重排一次，保证任何输入都能排完。
